@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>SiteLog — Scanner</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- ZXing: industry-standard QR decoder, far more robust than jsQR -->
 <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
-  /* Keep all existing styles — they are fine. Only a few additions: */
   :root {
     --black: #0a0a0a;
     --yellow: #f5c800;
@@ -56,6 +56,7 @@
     text-transform: uppercase;
   }
 
+  /* TABS */
   .tabs {
     display: flex;
     background: var(--gray);
@@ -79,8 +80,10 @@
   .view { display: none; flex: 1; overflow-y: auto; }
   .view.active { display: flex; flex-direction: column; }
 
-  /* Scan view */
-  #scanView { align-items: stretch; }
+  /* ===== SCAN VIEW ===== */
+  #scanView {
+    align-items: stretch;
+  }
 
   .cam-wrap {
     position: relative;
@@ -133,22 +136,6 @@
     100% { top: calc(100% - 8px); }
   }
 
-  /* New: scanning pulse ring */
-  .scan-pulse {
-    position: absolute;
-    inset: 0;
-    border: 2px solid rgba(245,200,0,0.5);
-    border-radius: 4px;
-    animation: pulse 1.5s ease-out infinite;
-    pointer-events: none;
-    display: none;
-  }
-  .scan-pulse.active { display: block; }
-  @keyframes pulse {
-    0% { transform: scale(1); opacity: 0.8; }
-    100% { transform: scale(1.03); opacity: 0; }
-  }
-
   .scan-hint {
     text-align: center;
     padding: 10px 16px 6px;
@@ -158,6 +145,7 @@
     flex-shrink: 0;
   }
 
+  /* Result flash */
   .result-flash {
     margin: 0 16px 10px;
     border-radius: 4px;
@@ -175,6 +163,7 @@
   .flash-meta { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: #aaa; }
   .flash-time { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; margin-top: 4px; }
 
+  /* Load DB bar */
   .load-bar {
     background: var(--gray2);
     border-top: 1px solid var(--gray3);
@@ -194,6 +183,7 @@
   }
   .db-status.loaded { color: var(--green-lt); }
 
+  /* CAM toggle */
   .cam-controls {
     display: flex;
     gap: 8px;
@@ -202,7 +192,7 @@
     flex-shrink: 0;
   }
 
-  /* Log view styles (unchanged) */
+  /* ===== LOG VIEW ===== */
   #logView { padding: 0; }
 
   .log-topbar {
@@ -278,6 +268,7 @@
     flex-shrink: 0;
   }
 
+  /* Buttons */
   .btn {
     border: none; border-radius: 2px; cursor: pointer;
     font-family: 'Bebas Neue', sans-serif; letter-spacing: 1.5px;
@@ -306,6 +297,7 @@
   }
   .toast.show { opacity: 1; transform: translateY(0); }
 
+  /* Manual add */
   .manual-panel {
     background: var(--gray2);
     border-top: 1px solid var(--gray3);
@@ -356,7 +348,6 @@
       <div class="scan-frame">
         <div class="scan-line"></div>
       </div>
-      <div class="scan-pulse" id="scanPulse"></div>
     </div>
   </div>
 
@@ -373,10 +364,10 @@
 
   <div class="cam-controls">
     <button class="btn btn-yellow" id="camBtn" onclick="toggleCamera()">▶ Start Camera</button>
-    <button class="btn btn-outline" id="switchCamBtn" onclick="switchCamera()" style="display:none;">🔄 Switch Camera</button>
     <button class="btn btn-outline" onclick="toggleManual()">✏ Manual Entry</button>
   </div>
 
+  <!-- Manual entry fallback -->
   <div class="manual-panel" id="manualPanel">
     <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--yellow);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Manual Check-In</div>
     <div class="manual-row" style="margin-bottom:8px;">
@@ -426,437 +417,325 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  (function(){
-    // ---- State ----
-    let workerDB     = [];
-    let todayLog     = JSON.parse(localStorage.getItem('sitelog_today') || '[]');
-    let codeReader   = null;
-    let scanning     = false;
-    let lastScan     = '';
-    let lastScanTime = 0;
-    let currentDeviceId = null;
-    let availableCameras = [];
+  // ---- State ----
+  let workerDB     = [];
+  let todayLog     = JSON.parse(localStorage.getItem('sitelog_today') || '[]');
+  let codeReader   = null;
+  let scanning     = false;
+  let lastScan     = '';
+  let lastScanTime = 0;
 
-    // ---- Init ----
-    const today = new Date();
-    document.getElementById('datePill').textContent =
-      today.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+  // ---- Init ----
+  const today = new Date();
+  document.getElementById('datePill').textContent =
+    today.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
 
-    const savedDB = localStorage.getItem('sitelog_workers_db');
-    if (savedDB) { try { workerDB = JSON.parse(savedDB); updateDBStatus(); } catch {} }
+  const savedDB = localStorage.getItem('sitelog_workers_db');
+  if (savedDB) { try { workerDB = JSON.parse(savedDB); updateDBStatus(); } catch {} }
 
-    // ---- Tabs ----
-    window.switchTab = function(tab) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-      const idx = tab === 'scan' ? 0 : 1;
-      document.querySelectorAll('.tab')[idx].classList.add('active');
-      document.getElementById(tab + 'View').classList.add('active');
-      if (tab === 'log') {
-        // Stop camera when leaving scan view to free resources
-        if (scanning) stopCamera();
-        renderLog();
-      }
-    };
+  // ---- Tabs ----
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const idx = tab === 'scan' ? 0 : 1;
+    document.querySelectorAll('.tab')[idx].classList.add('active');
+    document.getElementById(tab + 'View').classList.add('active');
+    if (tab === 'log') renderLog();
+  }
 
-    // ---- Toast ----
-    function showToast(msg, color) {
-      const t = document.getElementById('toast');
-      t.textContent = msg;
-      t.style.background = color || '#23a045';
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2500);
-    }
+  // ---- Toast ----
+  function showToast(msg, color) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = color || '#23a045';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
 
-    // ---- Camera Helpers ----
-    async function getVideoDevices() {
-      try {
-        const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-        availableCameras = devices;
-        return devices;
-      } catch (e) {
-        availableCameras = [];
-        return [];
-      }
-    }
+  // ---- Camera via ZXing ----
+  async function toggleCamera() {
+    if (scanning) { stopCamera(); } else { await startCamera(); }
+  }
 
-    function updateSwitchButton() {
-      const btn = document.getElementById('switchCamBtn');
-      btn.style.display = (availableCameras.length > 1 && scanning) ? 'inline-block' : 'none';
-    }
+  async function startCamera() {
+    const btn  = document.getElementById('camBtn');
+    const hint = document.getElementById('scanHint');
 
-    // ---- Camera Control ----
-    window.toggleCamera = async function() {
-      if (scanning) {
-        stopCamera();
-      } else {
-        await startCamera();
-      }
-    };
+    btn.textContent  = '⏳ Starting…';
+    btn.disabled     = true;
+    hint.textContent = 'Requesting camera…';
 
-    async function startCamera() {
-      const btn  = document.getElementById('camBtn');
-      const hint = document.getElementById('scanHint');
-      const pulse = document.getElementById('scanPulse');
+    try {
+      codeReader = new ZXing.BrowserMultiFormatReader();
 
-      btn.textContent  = '⏳ Starting…';
-      btn.disabled     = true;
-      hint.textContent = 'Requesting camera…';
-
-      // Clean up any existing reader
-      if (codeReader) {
-        try { codeReader.reset(); } catch(_) {}
-        codeReader = null;
-      }
-
-      try {
-        // Check for camera support
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('Camera API not supported in this browser');
-        }
-
-        codeReader = new ZXing.BrowserMultiFormatReader();
-
-        // Get list of cameras
-        const devices = await getVideoDevices();
-        if (devices.length === 0) {
-          throw new Error('No camera found on this device');
-        }
-
-        // Prefer rear camera
-        let deviceId = undefined;
-        const rear = devices.find(d => /back|rear|environment/i.test(d.label));
-        if (rear) deviceId = rear.deviceId;
-        else deviceId = devices[0].deviceId;
-        currentDeviceId = deviceId;
-
-        // Wait for video element to be ready
-        const video = document.getElementById('camVideo');
-        video.setAttribute('playsinline', 'true');
-        video.setAttribute('autoplay', 'true');
-        video.muted = true;
-
-        // Start decoding
-        await codeReader.decodeFromVideoDevice(
-          deviceId,
-          'camVideo',
-          (result, err) => {
-            if (result) {
-              // Show scanning pulse when a QR is detected
-              pulse.classList.add('active');
-              setTimeout(() => pulse.classList.remove('active'), 300);
-
-              const now = Date.now();
-              const raw = result.getText();
-              // Debounce: ignore same code within 4 seconds
-              if (raw !== lastScan || now - lastScanTime > 4000) {
-                lastScan     = raw;
-                lastScanTime = now;
-                handleQRCode(raw);
-              }
-            }
-            // Errors during scanning are normal (no QR in frame), ignore
-          }
-        );
-
-        scanning         = true;
-        btn.textContent  = '⏹ Stop Camera';
-        btn.disabled     = false;
-        hint.textContent = 'Point camera at worker\'s QR badge ↑';
-        updateSwitchButton();
-
-      } catch (e) {
-        console.error(e);
-        let errorMsg = 'Camera unavailable';
-        if (e.message.includes('Permission')) errorMsg = 'Camera permission denied';
-        else if (e.message.includes('not supported')) errorMsg = 'Browser does not support camera';
-        else if (e.message.includes('No camera')) errorMsg = 'No camera detected';
-        hint.textContent = errorMsg + ' — use Manual Entry';
-        btn.textContent  = '▶ Start Camera';
-        btn.disabled     = false;
-        showToast('⚠ ' + errorMsg, '#e8600a');
-      }
-    }
-
-    function stopCamera() {
-      if (codeReader) {
-        try { codeReader.reset(); } catch(_) {}
-        codeReader = null;
-      }
-      scanning = false;
-      document.getElementById('camBtn').textContent  = '▶ Start Camera';
-      document.getElementById('camBtn').disabled     = false;
-      document.getElementById('scanHint').textContent = 'Press Start Camera to begin scanning';
-      document.getElementById('switchCamBtn').style.display = 'none';
-      document.getElementById('scanPulse').classList.remove('active');
-    }
-
-    // Switch between front/rear cameras while scanning
-    window.switchCamera = async function() {
-      if (!scanning || !codeReader || availableCameras.length < 2) return;
-
-      const currentIdx = availableCameras.findIndex(c => c.deviceId === currentDeviceId);
-      const nextIdx = (currentIdx + 1) % availableCameras.length;
-      const newDeviceId = availableCameras[nextIdx].deviceId;
-
-      // Stop current stream
-      codeReader.reset();
-      
-      // Restart with new device
-      try {
-        await codeReader.decodeFromVideoDevice(
-          newDeviceId,
-          'camVideo',
-          (result, err) => {
-            if (result) {
-              document.getElementById('scanPulse').classList.add('active');
-              setTimeout(() => document.getElementById('scanPulse').classList.remove('active'), 300);
-              const now = Date.now();
-              const raw = result.getText();
-              if (raw !== lastScan || now - lastScanTime > 4000) {
-                lastScan     = raw;
-                lastScanTime = now;
-                handleQRCode(raw);
-              }
+      // Use constraints to request rear camera — no device enumeration needed
+      const hints = new Map();
+      // decodeFromConstraints lets us pass getUserMedia constraints directly
+      await codeReader.decodeFromConstraints(
+        { video: { facingMode: 'environment' } },
+        'camVideo',
+        (result, err) => {
+          if (result) {
+            const now = Date.now();
+            const raw = result.getText();
+            if (raw !== lastScan || now - lastScanTime > 3000) {
+              lastScan     = raw;
+              lastScanTime = now;
+              handleQRCode(raw);
             }
           }
-        );
-        currentDeviceId = newDeviceId;
-        showToast('Camera switched', '#888');
-      } catch (e) {
-        showToast('⚠ Could not switch camera', '#e8600a');
-        // Try to fallback to previous
-        try {
-          await codeReader.decodeFromVideoDevice(currentDeviceId, 'camVideo', () => {});
-        } catch {}
-      }
-    };
-
-    // ---- QR Processing ----
-    function handleQRCode(raw) {
-      let data;
-      try { data = JSON.parse(raw); } catch {
-        showFlash('error', '❌', 'Invalid QR Code', 'Not a SiteLog badge', '');
-        return;
-      }
-      if (!data.id) {
-        showFlash('error', '❌', 'Unknown QR Code', 'No worker ID found', '');
-        return;
-      }
-
-      const existing = todayLog.find(e => e.id === data.id);
-      if (existing) {
-        showFlash('dupe', '⚠️',
-          (data.fn || '') + ' ' + (data.ln || ''),
-          (data.trade || '') + (data.company ? ' · ' + data.company : ''),
-          'Already checked in at ' + existing.timeIn
-        );
-        return;
-      }
-
-      const dbRecord = workerDB.find(w => w.id === data.id);
-      const worker = dbRecord || {
-        id: data.id,
-        firstName: data.fn || '?',
-        lastName: data.ln || '?',
-        trade: data.trade || '?',
-        company: data.company || ''
-      };
-
-      const now = new Date();
-      const timeIn = now.toTimeString().slice(0,5);
-
-      const entry = {
-        id: worker.id,
-        firstName: worker.firstName,
-        lastName: worker.lastName,
-        trade: worker.trade,
-        company: worker.company || '',
-        phone: worker.phone || '',
-        timeIn,
-        date: now.toISOString().slice(0,10)
-      };
-
-      todayLog.push(entry);
-      saveTodayLog();
-
-      showFlash('success', '✅',
-        worker.firstName + ' ' + worker.lastName,
-        (worker.trade || '') + (worker.company ? ' · ' + worker.company : ''),
-        'Checked in at ' + timeIn
+          // err fires every frame when no QR visible — normal, ignore
+        }
       );
 
-      if (navigator.vibrate) navigator.vibrate(80);
+      scanning         = true;
+      btn.textContent  = '⏹ Stop Camera';
+      btn.disabled     = false;
+      hint.textContent = "Point camera at worker's QR badge ↑";
+
+    } catch (e) {
+      btn.textContent  = '▶ Start Camera';
+      btn.disabled     = false;
+      hint.textContent = 'Camera unavailable — use Manual Entry below';
+      showToast('⚠ Camera error: ' + (e.message || e), '#e8600a');
+    }
+  }
+
+  function stopCamera() {
+    if (codeReader) { try { codeReader.reset(); } catch(_) {} codeReader = null; }
+    scanning = false;
+    document.getElementById('camBtn').textContent  = '\u25b6 Start Camera';
+    document.getElementById('camBtn').disabled     = false;
+    document.getElementById('scanHint').textContent = 'Press Start Camera to begin scanning';
+  }
+
+  // ---- QR Processing ----
+  function handleQRCode(raw) {
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      showFlash('error', '❌', 'Invalid QR Code', 'Not a SiteLog badge', '');
+      return;
+    }
+    if (!data.id) {
+      showFlash('error', '❌', 'Unknown QR Code', 'No worker ID found', '');
+      return;
     }
 
-    function showFlash(type, icon, name, meta, time) {
-      const el = document.getElementById('resultFlash');
-      el.className = 'result-flash ' + type;
-      document.getElementById('flashIcon').textContent = icon;
-      document.getElementById('flashName').textContent = name;
-      document.getElementById('flashMeta').textContent = meta;
-      document.getElementById('flashTime').textContent = time;
-      clearTimeout(el._timer);
-      el._timer = setTimeout(() => { el.className = 'result-flash'; }, 4000);
-    }
-
-    // ---- DB Loading ----
-    window.loadDB = function() { document.getElementById('dbFile').click(); };
-
-    window.handleDBLoad = function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        try {
-          const data = JSON.parse(ev.target.result);
-          if (!Array.isArray(data)) throw new Error();
-          workerDB = data;
-          localStorage.setItem('sitelog_workers_db', JSON.stringify(workerDB));
-          updateDBStatus();
-          showToast(`✓ Loaded ${workerDB.length} workers`);
-        } catch { showToast('⚠ Invalid workers.json', '#e8600a'); }
-      };
-      reader.readAsText(file);
-      e.target.value = '';
-    };
-
-    function updateDBStatus() {
-      const el = document.getElementById('dbStatus');
-      if (workerDB.length > 0) {
-        el.textContent = `✓ ${workerDB.length} workers loaded`;
-        el.className = 'db-status loaded';
-      } else {
-        el.textContent = 'No worker database loaded';
-        el.className = 'db-status';
-      }
-    }
-
-    // ---- Manual Entry ----
-    window.toggleManual = function() {
-      const panel = document.getElementById('manualPanel');
-      panel.classList.toggle('open');
-      if (panel.classList.contains('open')) {
-        document.getElementById('manualSearch').focus();
-      }
-    };
-
-    window.searchManual = function() {
-      const q = document.getElementById('manualSearch').value.toLowerCase().trim();
-      const results = document.getElementById('manualResults');
-      if (!q || workerDB.length === 0) { results.innerHTML = ''; return; }
-
-      const matches = workerDB.filter(w =>
-        (w.firstName+' '+w.lastName+w.id).toLowerCase().includes(q)
-      ).slice(0, 5);
-
-      if (matches.length === 0) {
-        results.innerHTML = '<div style="font-size:0.75rem;color:#555;padding:4px 0">No matches found</div>';
-        return;
-      }
-
-      results.innerHTML = matches.map(w => `
-        <div onclick="manualCheckin('${w.id}')" style="
-          padding:8px 10px; margin-bottom:4px; background:var(--gray3);
-          border-radius:2px; cursor:pointer; display:flex; align-items:center; gap:10px;
-          font-size:0.85rem; border:1px solid transparent; transition:border-color 0.1s;
-        " onmouseover="this.style.borderColor='var(--yellow)'" onmouseout="this.style.borderColor='transparent'">
-          <span style="font-weight:600">${w.firstName} ${w.lastName}</span>
-          <span style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:#888">${w.id} · ${w.trade}</span>
-        </div>
-      `).join('');
-    };
-
-    window.manualCheckin = function(id) {
-      const w = workerDB.find(x => x.id === id);
-      if (!w) return;
-
-      const existing = todayLog.find(e => e.id === id);
-      if (existing) {
-        showToast(`⚠ ${w.firstName} already checked in at ${existing.timeIn}`, '#e8600a');
-        return;
-      }
-
-      const now = new Date();
-      const timeIn = now.toTimeString().slice(0,5);
-      todayLog.push({ id: w.id, firstName: w.firstName, lastName: w.lastName, trade: w.trade, company: w.company || '', phone: w.phone || '', timeIn, date: now.toISOString().slice(0,10) });
-      saveTodayLog();
-
-      document.getElementById('manualSearch').value = '';
-      document.getElementById('manualResults').innerHTML = '';
-      document.getElementById('manualPanel').classList.remove('open');
-      showToast(`✓ ${w.firstName} ${w.lastName} checked in at ${timeIn}`);
-      showFlash('success', '✅', w.firstName + ' ' + w.lastName, w.trade + (w.company ? ' · ' + w.company : ''), 'Checked in at ' + timeIn);
-      if (navigator.vibrate) navigator.vibrate(80);
-    };
-
-    // ---- Log ----
-    function saveTodayLog() {
-      localStorage.setItem('sitelog_today', JSON.stringify(todayLog));
-    }
-
-    function tradeBadge(t) {
-      const m = { Foreman:'badge-orange', Electrician:'badge-blue', Plumber:'badge-blue', 'Safety Officer':'badge-green', 'Site Engineer':'badge-green', Surveyor:'badge-green', 'Crane Operator':'badge-orange' };
-      return m[t] || 'badge-gray';
-    }
-
-    window.renderLog = function() {
-      const q = (document.getElementById('logSearch')?.value || '').toLowerCase();
-      const list = document.getElementById('logList');
-
-      const filtered = todayLog.filter(e =>
-        (e.firstName+' '+e.lastName+e.trade+e.company).toLowerCase().includes(q)
+    // Check if already logged today
+    const existing = todayLog.find(e => e.id === data.id);
+    if (existing) {
+      showFlash('dupe', '⚠️',
+        data.fn + ' ' + data.ln,
+        (data.trade || '') + (data.company ? ' · ' + data.company : ''),
+        'Already checked in at ' + existing.timeIn
       );
+      return;
+    }
 
-      document.getElementById('logTotal').textContent = todayLog.length;
-      document.getElementById('logTrades').textContent = new Set(todayLog.map(e => e.trade)).size;
-      document.getElementById('logCompanies').textContent = new Set(todayLog.map(e => e.company).filter(Boolean)).size;
+    // Find full record in DB
+    const dbRecord = workerDB.find(w => w.id === data.id);
+    const worker = dbRecord || {
+      id: data.id,
+      firstName: data.fn || '?',
+      lastName: data.ln || '?',
+      trade: data.trade || '?',
+      company: data.company || ''
+    };
 
-      if (filtered.length === 0) {
-        list.innerHTML = '<div class="empty-log">No check-ins yet.<br>Scan worker badges on the Scan tab.</div>';
-        return;
-      }
+    const now = new Date();
+    const timeIn = now.toTimeString().slice(0,5);
 
-      list.innerHTML = filtered.map((e, i) => `
-        <div class="log-item">
-          <div class="log-num">${todayLog.indexOf(e)+1}</div>
-          <div class="log-info">
-            <div class="log-name">${e.firstName} ${e.lastName}</div>
-            <div class="log-sub"><span class="badge ${tradeBadge(e.trade)}">${e.trade}</span> ${e.company ? '· ' + e.company : ''}</div>
-          </div>
-          <div class="log-time">${e.timeIn}</div>
+    const entry = {
+      id: worker.id,
+      firstName: worker.firstName,
+      lastName: worker.lastName,
+      trade: worker.trade,
+      company: worker.company || '',
+      phone: worker.phone || '',
+      timeIn,
+      date: now.toISOString().slice(0,10)
+    };
+
+    todayLog.push(entry);
+    saveTodayLog();
+
+    showFlash('success', '✅',
+      worker.firstName + ' ' + worker.lastName,
+      (worker.trade || '') + (worker.company ? ' · ' + worker.company : ''),
+      'Checked in at ' + timeIn
+    );
+
+    // Vibrate on success
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+
+  function showFlash(type, icon, name, meta, time) {
+    const el = document.getElementById('resultFlash');
+    el.className = 'result-flash ' + type;
+    document.getElementById('flashIcon').textContent = icon;
+    document.getElementById('flashName').textContent = name;
+    document.getElementById('flashMeta').textContent = meta;
+    document.getElementById('flashTime').textContent = time;
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.className = 'result-flash'; }, 4000);
+  }
+
+  // ---- DB Loading ----
+  function loadDB() { document.getElementById('dbFile').click(); }
+
+  function handleDBLoad(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data)) throw new Error();
+        workerDB = data;
+        localStorage.setItem('sitelog_workers_db', JSON.stringify(workerDB));
+        updateDBStatus();
+        showToast(`✓ Loaded ${workerDB.length} workers`);
+      } catch { showToast('⚠ Invalid workers.json', '#e8600a'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  function updateDBStatus() {
+    const el = document.getElementById('dbStatus');
+    if (workerDB.length > 0) {
+      el.textContent = `✓ ${workerDB.length} workers loaded`;
+      el.className = 'db-status loaded';
+    } else {
+      el.textContent = 'No worker database loaded';
+      el.className = 'db-status';
+    }
+  }
+
+  // ---- Manual Entry ----
+  function toggleManual() {
+    const panel = document.getElementById('manualPanel');
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')) {
+      document.getElementById('manualSearch').focus();
+    }
+  }
+
+  function searchManual() {
+    const q = document.getElementById('manualSearch').value.toLowerCase().trim();
+    const results = document.getElementById('manualResults');
+    if (!q || workerDB.length === 0) { results.innerHTML = ''; return; }
+
+    const matches = workerDB.filter(w =>
+      (w.firstName+' '+w.lastName+w.id).toLowerCase().includes(q)
+    ).slice(0, 5);
+
+    if (matches.length === 0) {
+      results.innerHTML = '<div style="font-size:0.75rem;color:#555;padding:4px 0">No matches found</div>';
+      return;
+    }
+
+    results.innerHTML = matches.map(w => `
+      <div onclick="manualCheckin('${w.id}')" style="
+        padding:8px 10px; margin-bottom:4px; background:var(--gray3);
+        border-radius:2px; cursor:pointer; display:flex; align-items:center; gap:10px;
+        font-size:0.85rem; border:1px solid transparent; transition:border-color 0.1s;
+      " onmouseover="this.style.borderColor='var(--yellow)'" onmouseout="this.style.borderColor='transparent'">
+        <span style="font-weight:600">${w.firstName} ${w.lastName}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:#888">${w.id} · ${w.trade}</span>
+      </div>
+    `).join('');
+  }
+
+  function manualCheckin(id) {
+    const w = workerDB.find(x => x.id === id);
+    if (!w) return;
+
+    const existing = todayLog.find(e => e.id === id);
+    if (existing) {
+      showToast(`⚠ ${w.firstName} already checked in at ${existing.timeIn}`, '#e8600a');
+      return;
+    }
+
+    const now = new Date();
+    const timeIn = now.toTimeString().slice(0,5);
+    todayLog.push({ id: w.id, firstName: w.firstName, lastName: w.lastName, trade: w.trade, company: w.company || '', phone: w.phone || '', timeIn, date: now.toISOString().slice(0,10) });
+    saveTodayLog();
+
+    document.getElementById('manualSearch').value = '';
+    document.getElementById('manualResults').innerHTML = '';
+    document.getElementById('manualPanel').classList.remove('open');
+    showToast(`✓ ${w.firstName} ${w.lastName} checked in at ${timeIn}`);
+    showFlash('success', '✅', w.firstName + ' ' + w.lastName, w.trade + (w.company ? ' · ' + w.company : ''), 'Checked in at ' + timeIn);
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+
+  // ---- Log ----
+  function saveTodayLog() {
+    localStorage.setItem('sitelog_today', JSON.stringify(todayLog));
+  }
+
+  function tradeBadge(t) {
+    const m = { Foreman:'badge-orange', Electrician:'badge-blue', Plumber:'badge-blue', 'Safety Officer':'badge-green', 'Site Engineer':'badge-green', Surveyor:'badge-green', 'Crane Operator':'badge-orange' };
+    return m[t] || 'badge-gray';
+  }
+
+  function renderLog() {
+    const q = (document.getElementById('logSearch')?.value || '').toLowerCase();
+    const list = document.getElementById('logList');
+
+    const filtered = todayLog.filter(e =>
+      (e.firstName+' '+e.lastName+e.trade+e.company).toLowerCase().includes(q)
+    );
+
+    document.getElementById('logTotal').textContent = todayLog.length;
+    document.getElementById('logTrades').textContent = new Set(todayLog.map(e => e.trade)).size;
+    document.getElementById('logCompanies').textContent = new Set(todayLog.map(e => e.company).filter(Boolean)).size;
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty-log">No check-ins yet.<br>Scan worker badges on the Scan tab.</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map((e, i) => `
+      <div class="log-item">
+        <div class="log-num">${todayLog.indexOf(e)+1}</div>
+        <div class="log-info">
+          <div class="log-name">${e.firstName} ${e.lastName}</div>
+          <div class="log-sub"><span class="badge ${tradeBadge(e.trade)}">${e.trade}</span> ${e.company ? '· ' + e.company : ''}</div>
         </div>
-      `).join('');
-    };
+        <div class="log-time">${e.timeIn}</div>
+      </div>
+    `).join('');
+  }
 
-    window.exportCSV = function() {
-      if (todayLog.length === 0) { showToast('No entries to export', '#e8600a'); return; }
-      const headers = ['#','Date','Time In','First Name','Last Name','Worker ID','Trade','Company','Phone'];
-      const rows = todayLog.map((e,i) => [
-        i+1, e.date, e.timeIn, e.firstName, e.lastName, e.id, e.trade, e.company, e.phone
-      ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+  function exportCSV() {
+    if (todayLog.length === 0) { showToast('No entries to export', '#e8600a'); return; }
+    const headers = ['#','Date','Time In','First Name','Last Name','Worker ID','Trade','Company','Phone'];
+    const rows = todayLog.map((e,i) => [
+      i+1, e.date, e.timeIn, e.firstName, e.lastName, e.id, e.trade, e.company, e.phone
+    ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
 
-      const csv = [headers.join(','), ...rows].join('\n');
-      const blob = new Blob([csv], { type: 'text/csv' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `site-log-${todayLog[0]?.date || 'today'}.csv`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      showToast(`✓ Exported ${todayLog.length} workers`);
-    };
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `site-log-${todayLog[0]?.date || 'today'}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast(`✓ Exported ${todayLog.length} workers`);
+  }
 
-    window.clearLog = function() {
-      if (todayLog.length === 0) return;
-      if (!confirm(`Clear all ${todayLog.length} check-ins from today's log?`)) return;
-      todayLog = [];
-      saveTodayLog();
-      renderLog();
-      showToast('Log cleared', '#888');
-    };
-
+  function clearLog() {
+    if (todayLog.length === 0) return;
+    if (!confirm(`Clear all ${todayLog.length} check-ins from today's log?`)) return;
+    todayLog = [];
+    saveTodayLog();
     renderLog();
-  })();
+    showToast('Log cleared', '#888');
+  }
+
+  renderLog();
 </script>
 </body>
 </html>
