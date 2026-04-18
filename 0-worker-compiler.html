@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiteLog — Worker Compiler</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0c0c0c;
+    --yellow: #f5c800;
+    --yellow-dk: #c9a000;
+    --orange: #e8600a;
+    --white: #f0ebe0;
+    --gray: #181818;
+    --gray2: #222;
+    --gray3: #2e2e2e;
+    --gray4: #444;
+    --gray5: #666;
+    --green: #1fa644;
+    --red: #cc3333;
+    --blue: #2a7fff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--black);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--yellow);
+    color: var(--black);
+    padding: 0 24px;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 4px solid var(--orange);
+    position: sticky; top: 0; z-index: 200;
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.7rem;
+    letter-spacing: 3px;
+  }
+  .logo em { color: var(--orange); font-style: normal; }
+  .logo sub {
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    opacity: 0.6;
+    vertical-align: middle;
+    margin-left: 6px;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .header-actions { display: flex; gap: 8px; }
+
+  /* ── LAYOUT ── */
+  .shell {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    height: calc(100vh - 54px);
+  }
+  @media (max-width: 700px) {
+    .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  }
+
+  /* ── LEFT SIDEBAR ── */
+  .sidebar {
+    background: var(--gray);
+    border-right: 1px solid var(--gray3);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-section {
+    border-bottom: 1px solid var(--gray3);
+    padding: 14px 16px;
+  }
+  .sec-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: var(--yellow);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* ── FORM ── */
+  .form-group { margin-bottom: 9px; }
+  .form-group label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--gray5);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 3px;
+  }
+  .form-group input,
+  .form-group select {
+    width: 100%;
+    background: var(--black);
+    border: 1px solid var(--gray4);
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.82rem;
+    padding: 6px 8px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus,
+  .form-group select:focus { border-color: var(--yellow); }
+  select option { background: var(--black); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  /* ── BUTTONS ── */
+  .btn {
+    border: none; border-radius: 2px; cursor: pointer;
+    font-family: 'Bebas Neue', sans-serif;
+    letter-spacing: 1.5px;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-yellow { background: var(--yellow); color: var(--black); }
+  .btn-yellow:hover { background: var(--yellow-dk); }
+  .btn-orange { background: var(--orange); color: #fff; }
+  .btn-orange:hover { opacity: 0.88; }
+  .btn-green  { background: var(--green); color: #fff; }
+  .btn-green:hover { opacity: 0.88; }
+  .btn-outline {
+    background: transparent;
+    border: 1px solid var(--gray4);
+    color: var(--white);
+  }
+  .btn-outline:hover { border-color: var(--yellow); color: var(--yellow); }
+  .btn-red { background: var(--red); color: #fff; }
+  .btn-lg { padding: 10px 18px; font-size: 1rem; width: 100%; text-align: center; display: block; }
+  .btn-sm { padding: 5px 11px; font-size: 0.78rem; }
+
+  .add-btn-wrap { padding: 12px 16px; }
+
+  /* ── CSV IMPORT ── */
+  .csv-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .csv-drop {
+    flex: 1;
+    margin: 0 16px 12px;
+    border: 2px dashed var(--gray4);
+    border-radius: 3px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    min-height: 100px;
+  }
+  .csv-drop:hover, .csv-drop.dragover {
+    border-color: var(--yellow);
+    background: rgba(245,200,0,0.04);
+  }
+  .csv-drop .drop-icon { font-size: 1.8rem; margin-bottom: 6px; }
+  .csv-drop p { font-size: 0.78rem; color: var(--gray5); line-height: 1.5; }
+  .csv-drop strong { color: var(--yellow); }
+  .csv-actions { padding: 0 16px 14px; display: flex; flex-direction: column; gap: 6px; }
+
+  .template-note {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--gray5);
+    line-height: 1.6;
+    padding: 10px 16px;
+    border-top: 1px solid var(--gray3);
+  }
+  .template-note strong { color: var(--yellow); }
+
+  /* ── MAIN GRID AREA ── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── TOOLBAR ── */
+  .toolbar {
+    background: var(--gray2);
+    border-bottom: 1px solid var(--gray3);
+    padding: 8px 16px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .toolbar input[type="text"] {
+    background: var(--black);
+    border: 1px solid var(--gray4);
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.83rem;
+    padding: 6px 10px;
+    outline: none;
+    width: 200px;
+    transition: border-color 0.15s;
+  }
+  .toolbar input[type="text"]:focus { border-color: var(--yellow); }
+  .toolbar .spacer { flex: 1; }
+  .count-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--gray5);
+    padding: 4px 10px;
+    background: var(--black);
+    border: 1px solid var(--gray4);
+    border-radius: 2px;
+  }
+  .count-badge span { color: var(--yellow); font-weight: 600; }
+
+  /* ── TABLE ── */
+  .table-wrap {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    min-width: 900px;
+  }
+
+  thead {
+    position: sticky; top: 0; z-index: 10;
+  }
+  thead th {
+    background: var(--gray2);
+    padding: 8px 10px;
+    text-align: left;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.58rem;
+    font-weight: 600;
+    color: var(--gray5);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 2px solid var(--orange);
+    white-space: nowrap;
+    user-select: none;
+  }
+  thead th.req::after { content: ' *'; color: var(--orange); }
+  thead th:first-child { width: 40px; text-align: center; }
+  thead th:last-child  { width: 60px; text-align: center; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--gray3);
+    transition: background 0.08s;
+  }
+  tbody tr:hover { background: rgba(245,200,0,0.03); }
+  tbody tr.selected { background: rgba(245,200,0,0.06); }
+  tbody tr.error-row { background: rgba(204,51,51,0.07); }
+
+  td {
+    padding: 4px 4px;
+    vertical-align: middle;
+  }
+  td:first-child { text-align: center; }
+  td:last-child  { text-align: center; }
+
+  /* Inline editable cells */
+  .cell-input {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.82rem;
+    padding: 4px 6px;
+    outline: none;
+    transition: border-color 0.1s, background 0.1s;
+  }
+  .cell-input:focus {
+    background: var(--black);
+    border-color: var(--yellow);
+  }
+  .cell-input.invalid { border-color: var(--red) !important; background: rgba(204,51,51,0.08); }
+
+  .cell-select {
+    width: 100%;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.82rem;
+    padding: 4px 4px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.1s, background 0.1s;
+    -webkit-appearance: none;
+  }
+  .cell-select:focus {
+    background: var(--black);
+    border-color: var(--yellow);
+  }
+  .cell-select option { background: var(--black); }
+
+  .row-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--gray5);
+  }
+
+  .del-btn {
+    background: none;
+    border: none;
+    color: var(--gray5);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 2px 6px;
+    border-radius: 2px;
+    transition: color 0.1s, background 0.1s;
+    line-height: 1;
+  }
+  .del-btn:hover { color: var(--red); background: rgba(204,51,51,0.12); }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray5);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    text-align: center;
+    gap: 10px;
+    pointer-events: none;
+  }
+  .empty-state .big { font-size: 2.5rem; }
+  .empty-state p { line-height: 1.6; }
+
+  /* ── BOTTOM EXPORT BAR ── */
+  .export-bar {
+    background: var(--gray2);
+    border-top: 2px solid var(--orange);
+    padding: 10px 16px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .export-bar .spacer { flex: 1; }
+  .validation-msg {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+  }
+  .validation-msg.ok  { color: var(--green); }
+  .validation-msg.err { color: var(--red); }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--green); color: #fff;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+    padding: 9px 16px; border-radius: 3px;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none; z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ── MODAL ── */
+  .modal-bg {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 500;
+    align-items: center; justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--gray);
+    border: 1px solid var(--gray3);
+    border-top: 3px solid var(--orange);
+    border-radius: 4px;
+    padding: 24px;
+    width: 90%;
+    max-width: 500px;
+    font-size: 0.88rem;
+  }
+  .modal h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.3rem;
+    letter-spacing: 2px;
+    color: var(--yellow);
+    margin-bottom: 14px;
+  }
+  .modal p { color: #aaa; line-height: 1.6; margin-bottom: 12px; }
+  .modal code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    background: var(--black);
+    border: 1px solid var(--gray4);
+    padding: 10px 12px;
+    display: block;
+    border-radius: 2px;
+    color: var(--yellow);
+    margin-bottom: 14px;
+    word-break: break-all;
+    line-height: 1.6;
+  }
+  .modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* Checkbox */
+  input[type="checkbox"] {
+    accent-color: var(--yellow);
+    width: 14px; height: 14px;
+    cursor: pointer;
+  }
+
+  @media (max-width: 700px) {
+    .sidebar { max-height: 340px; overflow-y: auto; }
+    .logo sub { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Site<em>Log</em> <sub>Worker Compiler</sub></div>
+  <div class="header-actions">
+    <button class="btn btn-outline btn-sm" onclick="openModal()">? Format Help</button>
+  </div>
+</header>
+
+<div class="shell">
+
+  <!-- ── SIDEBAR ── -->
+  <div class="sidebar">
+
+    <!-- Quick add single worker -->
+    <div class="sidebar-section">
+      <div class="sec-label">⛑ Add Single Worker</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>First Name *</label>
+          <input type="text" id="fn" placeholder="John" onkeydown="enterAdd(event)">
+        </div>
+        <div class="form-group">
+          <label>Last Name *</label>
+          <input type="text" id="ln" placeholder="Doe" onkeydown="enterAdd(event)">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Trade / Role *</label>
+        <select id="trade">
+          <option value="">— Select —</option>
+          <option>Foreman</option>
+          <option>Carpenter</option>
+          <option>Electrician</option>
+          <option>Plumber</option>
+          <option>Concrete Worker</option>
+          <option>Steel Fixer</option>
+          <option>Crane Operator</option>
+          <option>Scaffolder</option>
+          <option>Laborer</option>
+          <option>Safety Officer</option>
+          <option>Site Engineer</option>
+          <option>Surveyor</option>
+          <option>Welder</option>
+          <option>Driver</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Company</label>
+        <input type="text" id="company" placeholder="ABC Contractors" onkeydown="enterAdd(event)">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="tel" id="phone" placeholder="+1 555 0000" onkeydown="enterAdd(event)">
+        </div>
+        <div class="form-group">
+          <label>Worker ID</label>
+          <input type="text" id="wid" placeholder="Auto" onkeydown="enterAdd(event)">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>EC Name</label>
+          <input type="text" id="ecName" placeholder="Emergency contact" onkeydown="enterAdd(event)">
+        </div>
+        <div class="form-group">
+          <label>EC Phone</label>
+          <input type="tel" id="ecPhone" placeholder="+1 555 9999" onkeydown="enterAdd(event)">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>National ID</label>
+          <input type="text" id="natId" placeholder="XX-000000" onkeydown="enterAdd(event)">
+        </div>
+        <div class="form-group">
+          <label>Cert. Expiry</label>
+          <input type="date" id="certExp" onkeydown="enterAdd(event)">
+        </div>
+      </div>
+    </div>
+
+    <div class="add-btn-wrap">
+      <button class="btn btn-yellow btn-lg" onclick="addWorker()">+ Add to List</button>
+    </div>
+
+    <!-- CSV Import -->
+    <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div class="sec-label">📂 Bulk Import CSV</div>
+      <div class="csv-area">
+        <div class="csv-drop" id="csvDrop"
+             ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropCSV(event)"
+             onclick="document.getElementById('csvFile').click()">
+          <div class="drop-icon">📄</div>
+          <p>Drop a <strong>.csv file</strong> here<br>or click to browse</p>
+        </div>
+        <div class="csv-actions">
+          <button class="btn btn-outline btn-sm" style="width:100%" onclick="downloadTemplate()">⬇ Download CSV Template</button>
+          <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="handleCSVFile(event)">
+        </div>
+      </div>
+      <div class="template-note">
+        <strong>Columns:</strong> firstName, lastName, trade, company, phone, workerId, ecName, ecPhone, natId, certExp
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+    <div class="toolbar">
+      <input type="text" placeholder="🔍 Filter workers…" oninput="filterTable(this.value)">
+      <div class="spacer"></div>
+      <button class="btn btn-outline btn-sm" onclick="selectAll()">Select All</button>
+      <button class="btn btn-red btn-sm" onclick="deleteSelected()">✕ Delete Selected</button>
+      <div class="count-badge"><span id="countNum">0</span> workers</div>
+    </div>
+
+    <div class="table-wrap" id="tableWrap">
+      <table id="workerTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="checkAll" onchange="toggleAll(this.checked)"></th>
+            <th>#</th>
+            <th class="req">First Name</th>
+            <th class="req">Last Name</th>
+            <th class="req">Trade / Role</th>
+            <th>Company</th>
+            <th>Phone</th>
+            <th>Worker ID</th>
+            <th>EC Name</th>
+            <th>EC Phone</th>
+            <th>Nat. ID</th>
+            <th>Cert. Expiry</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+
+      <div class="empty-state" id="emptyState">
+        <div class="big">👷</div>
+        <p>No workers yet.<br>Add them one-by-one using the form,<br>or bulk import a CSV file.</p>
+      </div>
+    </div>
+
+    <div class="export-bar">
+      <div class="validation-msg" id="valMsg"></div>
+      <div class="spacer"></div>
+      <button class="btn btn-outline btn-sm" onclick="clearAll()">✕ Clear All</button>
+      <button class="btn btn-orange" style="padding:9px 20px;font-size:1rem" onclick="exportJSON()">⬇ Export workers.json</button>
+    </div>
+  </div>
+</div>
+
+<!-- FORMAT HELP MODAL -->
+<div class="modal-bg" id="modalBg" onclick="closeModal(event)">
+  <div class="modal">
+    <h2>CSV Format Guide</h2>
+    <p>Your CSV file must have a header row with these column names (order doesn't matter, extra columns are ignored):</p>
+    <code>firstName,lastName,trade,company,phone,workerId,ecName,ecPhone,natId,certExp</code>
+    <p>Only <strong style="color:var(--yellow)">firstName</strong>, <strong style="color:var(--yellow)">lastName</strong>, and <strong style="color:var(--yellow)">trade</strong> are required. All other columns are optional.</p>
+    <p>Example row:<br>
+    <code>John,Doe,Electrician,ABC Corp,+1 555 1234,W-1001,Jane Doe,+1 555 9999,XX-0001,2026-12-31</code></p>
+    <p style="color:var(--gray5);font-size:0.8rem;">Trade must be one of: Foreman, Carpenter, Electrician, Plumber, Concrete Worker, Steel Fixer, Crane Operator, Scaffolder, Laborer, Safety Officer, Site Engineer, Surveyor, Welder, Driver, Other</p>
+    <div class="modal-actions">
+      <button class="btn btn-yellow btn-sm" onclick="closeModalDirect()">Got It</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const TRADES = ['Foreman','Carpenter','Electrician','Plumber','Concrete Worker','Steel Fixer','Crane Operator','Scaffolder','Laborer','Safety Officer','Site Engineer','Surveyor','Welder','Driver','Other'];
+  let workers = [];
+  let filterQ = '';
+
+  // ── ID generator ──
+  function nextId() {
+    const used = new Set(workers.map(w => w.id).filter(Boolean));
+    let n = 1001;
+    while (used.has('W-' + n)) n++;
+    return 'W-' + n;
+  }
+
+  // ── Toast ──
+  function showToast(msg, color) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = color || '#1fa644';
+    t.classList.add('show');
+    clearTimeout(t._t);
+    t._t = setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  // ── Add single worker ──
+  function addWorker() {
+    const fn = document.getElementById('fn').value.trim();
+    const ln = document.getElementById('ln').value.trim();
+    const trade = document.getElementById('trade').value;
+    if (!fn || !ln) { showToast('⚠ First & last name required', '#e8600a'); return; }
+    if (!trade)     { showToast('⚠ Select a trade', '#e8600a'); return; }
+
+    const wid = document.getElementById('wid').value.trim() || nextId();
+
+    workers.push({
+      id: wid,
+      firstName: fn,
+      lastName: ln,
+      trade,
+      company:  document.getElementById('company').value.trim(),
+      phone:    document.getElementById('phone').value.trim(),
+      ecName:   document.getElementById('ecName').value.trim(),
+      ecPhone:  document.getElementById('ecPhone').value.trim(),
+      natId:    document.getElementById('natId').value.trim(),
+      certExp:  document.getElementById('certExp').value,
+      registeredAt: new Date().toISOString()
+    });
+
+    // clear form
+    ['fn','ln','wid','company','phone','ecName','ecPhone','natId','certExp'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('trade').value = '';
+    document.getElementById('fn').focus();
+
+    renderTable();
+    showToast(`✓ ${fn} ${ln} added`);
+  }
+
+  function enterAdd(e) { if (e.key === 'Enter') addWorker(); }
+
+  // ── Render table ──
+  function renderTable() {
+    const q = filterQ.toLowerCase();
+    const body = document.getElementById('tableBody');
+    const empty = document.getElementById('emptyState');
+    const filtered = workers.filter(w =>
+      !q || (w.firstName+' '+w.lastName+w.trade+w.company+w.id).toLowerCase().includes(q)
+    );
+
+    document.getElementById('countNum').textContent = workers.length;
+    document.getElementById('checkAll').checked = false;
+
+    if (workers.length === 0) {
+      body.innerHTML = '';
+      empty.style.display = 'flex';
+      updateValidation();
+      return;
+    }
+    empty.style.display = 'none';
+
+    body.innerHTML = filtered.map((w, fi) => {
+      const realIdx = workers.indexOf(w);
+      const hasErr = !w.firstName || !w.lastName || !w.trade;
+      return `<tr class="${hasErr ? 'error-row' : ''}" id="row-${realIdx}">
+        <td><input type="checkbox" class="row-check" data-idx="${realIdx}" onchange="updateCheckAll()"></td>
+        <td><span class="row-num">${realIdx + 1}</span></td>
+        <td><input class="cell-input ${!w.firstName ? 'invalid' : ''}" value="${esc(w.firstName)}" onchange="update(${realIdx},'firstName',this.value)" oninput="liveUpdate(${realIdx},'firstName',this)"></td>
+        <td><input class="cell-input ${!w.lastName ? 'invalid' : ''}" value="${esc(w.lastName)}" onchange="update(${realIdx},'lastName',this.value)" oninput="liveUpdate(${realIdx},'lastName',this)"></td>
+        <td>
+          <select class="cell-select ${!w.trade ? 'invalid' : ''}" onchange="update(${realIdx},'trade',this.value)">
+            <option value="">— Select —</option>
+            ${TRADES.map(t => `<option ${w.trade===t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </td>
+        <td><input class="cell-input" value="${esc(w.company)}" onchange="update(${realIdx},'company',this.value)"></td>
+        <td><input class="cell-input" value="${esc(w.phone)}" onchange="update(${realIdx},'phone',this.value)"></td>
+        <td><input class="cell-input" value="${esc(w.id)}" onchange="update(${realIdx},'id',this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:#aaa"></td>
+        <td><input class="cell-input" value="${esc(w.ecName)}" onchange="update(${realIdx},'ecName',this.value)"></td>
+        <td><input class="cell-input" value="${esc(w.ecPhone)}" onchange="update(${realIdx},'ecPhone',this.value)"></td>
+        <td><input class="cell-input" value="${esc(w.natId)}" onchange="update(${realIdx},'natId',this.value)" style="font-family:'IBM Plex Mono',monospace;font-size:0.75rem"></td>
+        <td><input class="cell-input" type="date" value="${w.certExp||''}" onchange="update(${realIdx},'certExp',this.value)" style="font-size:0.75rem"></td>
+        <td><button class="del-btn" onclick="deleteRow(${realIdx})" title="Remove">✕</button></td>
+      </tr>`;
+    }).join('');
+
+    updateValidation();
+  }
+
+  function esc(s) { return (s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+  function update(idx, field, val) {
+    workers[idx][field] = val.trim();
+    // re-render just validation classes without full re-render
+    const row = document.getElementById('row-' + idx);
+    if (row) {
+      const hasErr = !workers[idx].firstName || !workers[idx].lastName || !workers[idx].trade;
+      row.className = hasErr ? 'error-row' : '';
+    }
+    updateValidation();
+  }
+
+  function liveUpdate(idx, field, input) {
+    workers[idx][field] = input.value;
+    input.className = 'cell-input' + (input.value.trim() ? '' : ' invalid');
+    updateValidation();
+  }
+
+  function filterTable(q) { filterQ = q; renderTable(); }
+
+  function deleteRow(idx) {
+    workers.splice(idx, 1);
+    renderTable();
+  }
+
+  function selectAll() {
+    document.querySelectorAll('.row-check').forEach(c => c.checked = true);
+    updateCheckAll();
+  }
+
+  function toggleAll(checked) {
+    document.querySelectorAll('.row-check').forEach(c => c.checked = checked);
+  }
+
+  function updateCheckAll() {
+    const all = document.querySelectorAll('.row-check');
+    const checked = document.querySelectorAll('.row-check:checked');
+    document.getElementById('checkAll').checked = all.length > 0 && all.length === checked.length;
+  }
+
+  function deleteSelected() {
+    const idxs = [...document.querySelectorAll('.row-check:checked')].map(c => parseInt(c.dataset.idx));
+    if (idxs.length === 0) { showToast('No rows selected', '#e8600a'); return; }
+    if (!confirm(`Delete ${idxs.length} selected worker(s)?`)) return;
+    workers = workers.filter((_, i) => !idxs.includes(i));
+    renderTable();
+    showToast(`Deleted ${idxs.length} worker(s)`);
+  }
+
+  function clearAll() {
+    if (workers.length === 0) return;
+    if (!confirm(`Clear all ${workers.length} workers?`)) return;
+    workers = [];
+    renderTable();
+    showToast('Cleared', '#888');
+  }
+
+  // ── Validation ──
+  function updateValidation() {
+    const errs = workers.filter(w => !w.firstName || !w.lastName || !w.trade).length;
+    const el = document.getElementById('valMsg');
+    if (workers.length === 0) { el.textContent = ''; return; }
+    if (errs === 0) {
+      el.textContent = `✓ ${workers.length} worker${workers.length>1?'s':''} ready to export`;
+      el.className = 'validation-msg ok';
+    } else {
+      el.textContent = `⚠ ${errs} row${errs>1?'s':''} missing required fields (highlighted in red)`;
+      el.className = 'validation-msg err';
+    }
+  }
+
+  // ── Export JSON ──
+  function exportJSON() {
+    if (workers.length === 0) { showToast('No workers to export', '#e8600a'); return; }
+    const errs = workers.filter(w => !w.firstName || !w.lastName || !w.trade).length;
+    if (errs > 0) {
+      if (!confirm(`${errs} row(s) are missing required fields and may cause issues. Export anyway?`)) return;
+    }
+
+    // Assign IDs to any missing ones
+    const used = new Set(workers.filter(w => w.id).map(w => w.id));
+    let n = 1001;
+    workers.forEach(w => {
+      if (!w.id) {
+        while (used.has('W-' + n)) n++;
+        w.id = 'W-' + n;
+        used.add(w.id);
+        n++;
+      }
+      if (!w.registeredAt) w.registeredAt = new Date().toISOString();
+    });
+
+    const json = JSON.stringify(workers, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'workers.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast(`✓ workers.json exported (${workers.length} workers)`);
+    renderTable();
+  }
+
+  // ── CSV Import ──
+  function dragOver(e) { e.preventDefault(); document.getElementById('csvDrop').classList.add('dragover'); }
+  function dragLeave()  { document.getElementById('csvDrop').classList.remove('dragover'); }
+  function dropCSV(e)   { e.preventDefault(); dragLeave(); const f = e.dataTransfer.files[0]; if (f) parseCSV(f); }
+
+  function handleCSVFile(e) {
+    const f = e.target.files[0];
+    if (f) parseCSV(f);
+    e.target.value = '';
+  }
+
+  function parseCSV(file) {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target.result;
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (lines.length < 2) { showToast('CSV has no data rows', '#e8600a'); return; }
+
+      const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,'').toLowerCase());
+
+      const colMap = {
+        firstname: 'firstName', lastname: 'lastName', trade: 'trade',
+        company: 'company', phone: 'phone', workerid: 'id',
+        ecname: 'ecName', ecphone: 'ecPhone', natid: 'natId', certexp: 'certExp'
+      };
+
+      const mapped = headers.map(h => colMap[h.replace(/[\s_-]/g,'')] || null);
+
+      let added = 0, skipped = 0;
+      const existingIds = new Set(workers.map(w => w.id).filter(Boolean));
+
+      for (let i = 1; i < lines.length; i++) {
+        const vals = splitCSVLine(lines[i]);
+        if (vals.length === 0 || vals.every(v => !v)) continue;
+
+        const w = { registeredAt: new Date().toISOString() };
+        mapped.forEach((field, fi) => {
+          if (field) w[field] = (vals[fi] || '').trim();
+        });
+
+        if (!w.firstName && !w.lastName) { skipped++; continue; }
+
+        // De-dupe by ID
+        if (w.id && existingIds.has(w.id)) { skipped++; continue; }
+        if (w.id) existingIds.add(w.id);
+
+        workers.push(w);
+        added++;
+      }
+
+      renderTable();
+      showToast(`✓ Imported ${added} workers${skipped ? ` (${skipped} skipped)` : ''}`);
+    };
+    reader.readAsText(file);
+  }
+
+  function splitCSVLine(line) {
+    const result = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  // ── CSV Template ──
+  function downloadTemplate() {
+    const headers = 'firstName,lastName,trade,company,phone,workerId,ecName,ecPhone,natId,certExp';
+    const example = 'John,Doe,Electrician,ABC Contractors,+1 555 0000,W-1001,Jane Doe,+1 555 9999,XX-000001,2027-06-30';
+    const blob = new Blob([headers + '\n' + example + '\n'], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'workers-template.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('Template downloaded');
+  }
+
+  // ── Modal ──
+  function openModal()      { document.getElementById('modalBg').classList.add('open'); }
+  function closeModalDirect() { document.getElementById('modalBg').classList.remove('open'); }
+  function closeModal(e)    { if (e.target === document.getElementById('modalBg')) closeModalDirect(); }
+
+  // Init
+  renderTable();
+</script>
+</body>
+</html>

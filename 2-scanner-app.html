@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SiteLog — Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+  :root {
+    --black: #0a0a0a;
+    --yellow: #f5c800;
+    --yellow-dk: #c9a200;
+    --orange: #e8600a;
+    --white: #f4efe6;
+    --gray: #1a1a1a;
+    --gray2: #252525;
+    --gray3: #333;
+    --gray4: #555;
+    --green: #23a045;
+    --green-lt: #2ec25a;
+    --red: #d93b3b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--black);
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    background: var(--yellow);
+    color: var(--black);
+    padding: 12px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 3px solid var(--orange);
+    flex-shrink: 0;
+  }
+  .logo { font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; letter-spacing: 2px; }
+  .logo em { color: var(--orange); font-style: normal; }
+  .header-right { display: flex; gap: 8px; align-items: center; }
+  .date-pill {
+    background: var(--black);
+    color: var(--yellow);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+
+  /* TABS */
+  .tabs {
+    display: flex;
+    background: var(--gray);
+    border-bottom: 2px solid var(--gray3);
+    flex-shrink: 0;
+  }
+  .tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1rem;
+    letter-spacing: 1.5px;
+    color: var(--gray4);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab.active { color: var(--yellow); border-bottom-color: var(--yellow); }
+
+  .view { display: none; flex: 1; overflow-y: auto; }
+  .view.active { display: flex; flex-direction: column; }
+
+  /* ===== SCAN VIEW ===== */
+  #scanView {
+    align-items: stretch;
+  }
+
+  .cam-wrap {
+    position: relative;
+    background: #000;
+    width: 100%;
+    aspect-ratio: 1;
+    max-height: 55vw;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  #camVideo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  #camCanvas { display: none; }
+
+  .scan-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .scan-frame {
+    width: 55%;
+    aspect-ratio: 1;
+    border: 3px solid var(--yellow);
+    border-radius: 4px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+    position: relative;
+  }
+  .scan-frame::before, .scan-frame::after {
+    content: '';
+    position: absolute;
+    width: 20px; height: 20px;
+  }
+  .scan-line {
+    position: absolute;
+    left: 4px; right: 4px;
+    height: 2px;
+    background: var(--yellow);
+    opacity: 0.8;
+    animation: scanline 2s linear infinite;
+  }
+  @keyframes scanline {
+    0% { top: 8px; }
+    100% { top: calc(100% - 8px); }
+  }
+
+  .scan-hint {
+    text-align: center;
+    padding: 10px 16px 6px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--gray4);
+    flex-shrink: 0;
+  }
+
+  /* Result flash */
+  .result-flash {
+    margin: 0 16px 10px;
+    border-radius: 4px;
+    padding: 14px 16px;
+    display: none;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .result-flash.success { display: flex; background: rgba(35,160,69,0.15); border: 1px solid rgba(35,160,69,0.4); }
+  .result-flash.error   { display: flex; background: rgba(217,59,59,0.15); border: 1px solid rgba(217,59,59,0.4); }
+  .result-flash.dupe    { display: flex; background: rgba(232,96,10,0.15); border: 1px solid rgba(232,96,10,0.4); }
+  .flash-icon { font-size: 2rem; flex-shrink: 0; }
+  .flash-name { font-family: 'Bebas Neue', sans-serif; font-size: 1.3rem; letter-spacing: 1px; }
+  .flash-meta { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: #aaa; }
+  .flash-time { font-family: 'IBM Plex Mono', monospace; font-size: 0.78rem; margin-top: 4px; }
+
+  /* Load DB bar */
+  .load-bar {
+    background: var(--gray2);
+    border-top: 1px solid var(--gray3);
+    padding: 10px 16px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .db-status {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--gray4);
+    flex: 1;
+    min-width: 100px;
+  }
+  .db-status.loaded { color: var(--green-lt); }
+
+  /* CAM toggle */
+  .cam-controls {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--gray2);
+    flex-shrink: 0;
+  }
+
+  /* ===== LOG VIEW ===== */
+  #logView { padding: 0; }
+
+  .log-topbar {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--gray2);
+    border-bottom: 1px solid var(--gray3);
+    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .log-topbar input {
+    flex: 1; min-width: 120px;
+    background: var(--black);
+    border: 1px solid var(--gray3);
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.85rem;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .log-topbar input:focus { border-color: var(--yellow); }
+
+  .stats-strip {
+    display: grid;
+    grid-template-columns: repeat(3,1fr);
+    gap: 1px;
+    background: var(--gray3);
+    flex-shrink: 0;
+  }
+  .strip-stat { background: var(--gray2); text-align: center; padding: 8px 4px; }
+  .strip-num { font-family: 'Bebas Neue', sans-serif; font-size: 1.6rem; color: var(--yellow); line-height: 1; }
+  .strip-lbl { font-family: 'IBM Plex Mono', monospace; font-size: 0.55rem; color: var(--gray4); text-transform: uppercase; }
+
+  .log-list { flex: 1; overflow-y: auto; }
+  .log-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--gray2);
+    transition: background 0.1s;
+  }
+  .log-item:hover { background: rgba(245,200,0,0.03); }
+  .log-num { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--gray4); width: 22px; text-align: right; flex-shrink: 0; }
+  .log-info { flex: 1; min-width: 0; }
+  .log-name { font-weight: 600; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-sub  { font-family: 'IBM Plex Mono', monospace; font-size: 0.65rem; color: var(--gray4); margin-top: 2px; }
+  .log-time { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; color: var(--green-lt); flex-shrink: 0; }
+
+  .badge {
+    display: inline-block; padding: 1px 7px; border-radius: 2px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.58rem;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    flex-shrink: 0;
+  }
+  .badge-yellow { background: rgba(245,200,0,.12); color: var(--yellow); border: 1px solid rgba(245,200,0,.25); }
+  .badge-blue   { background: rgba(80,140,255,.12); color: #7ab4ff; border: 1px solid rgba(80,140,255,.25); }
+  .badge-green  { background: rgba(46,168,79,.12); color: #5de07a; border: 1px solid rgba(46,168,79,.25); }
+  .badge-orange { background: rgba(232,96,10,.12); color: #f0884a; border: 1px solid rgba(232,96,10,.25); }
+  .badge-gray   { background: rgba(90,90,90,.2); color: #aaa; border: 1px solid rgba(90,90,90,.3); }
+
+  .empty-log { text-align: center; padding: 50px 20px; color: var(--gray4); font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; }
+
+  .export-bar {
+    padding: 10px 14px;
+    background: var(--gray2);
+    border-top: 1px solid var(--gray3);
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Buttons */
+  .btn {
+    border: none; border-radius: 2px; cursor: pointer;
+    font-family: 'Bebas Neue', sans-serif; letter-spacing: 1.5px;
+    padding: 8px 14px; font-size: 0.9rem;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-yellow { background: var(--yellow); color: var(--black); }
+  .btn-yellow:hover { background: var(--yellow-dk); }
+  .btn-orange { background: var(--orange); color: #fff; }
+  .btn-outline { background: transparent; border: 1px solid var(--gray3); color: var(--white); font-size: 0.8rem; }
+  .btn-outline:hover { border-color: var(--yellow); color: var(--yellow); }
+  .btn-red { background: var(--red); color: #fff; }
+  .btn-green { background: var(--green); color: #fff; }
+
+  .toast {
+    position: fixed; bottom: 16px; right: 16px;
+    background: var(--green); color: #fff;
+    font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem;
+    padding: 9px 16px; border-radius: 3px;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none; z-index: 999;
+    max-width: calc(100vw - 32px);
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* Manual add */
+  .manual-panel {
+    background: var(--gray2);
+    border-top: 1px solid var(--gray3);
+    padding: 12px 16px;
+    display: none;
+    flex-shrink: 0;
+  }
+  .manual-panel.open { display: block; }
+  .manual-row { display: flex; gap: 8px; align-items: center; }
+  .manual-row input, .manual-row select {
+    flex: 1;
+    background: var(--black);
+    border: 1px solid var(--gray3);
+    border-radius: 2px;
+    color: var(--white);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.85rem;
+    padding: 7px 10px;
+    outline: none;
+  }
+  .manual-row input:focus, .manual-row select:focus { border-color: var(--yellow); }
+
+  @media (min-width: 600px) {
+    .cam-wrap { max-height: 340px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Site<em>Log</em> <span style="font-size:0.85rem;opacity:.6;letter-spacing:1px">SCANNER</span></div>
+  <div class="header-right">
+    <div class="date-pill" id="datePill"></div>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('scan')">📷 Scan</div>
+  <div class="tab" onclick="switchTab('log')">📋 Today's Log</div>
+</div>
+
+<!-- SCAN VIEW -->
+<div class="view active" id="scanView">
+  <div class="cam-wrap">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <canvas id="camCanvas"></canvas>
+    <div class="scan-overlay">
+      <div class="scan-frame">
+        <div class="scan-line"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scan-hint" id="scanHint">Point camera at worker's QR badge</div>
+
+  <div class="result-flash" id="resultFlash">
+    <div class="flash-icon" id="flashIcon"></div>
+    <div>
+      <div class="flash-name" id="flashName"></div>
+      <div class="flash-meta" id="flashMeta"></div>
+      <div class="flash-time" id="flashTime"></div>
+    </div>
+  </div>
+
+  <div class="cam-controls">
+    <button class="btn btn-yellow" id="camBtn" onclick="toggleCamera()">▶ Start Camera</button>
+    <button class="btn btn-outline" onclick="toggleManual()">✏ Manual Entry</button>
+  </div>
+
+  <!-- Manual entry fallback -->
+  <div class="manual-panel" id="manualPanel">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--yellow);font-weight:600;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">Manual Check-In</div>
+    <div class="manual-row" style="margin-bottom:8px;">
+      <input type="text" id="manualSearch" placeholder="Type worker name or ID…" oninput="searchManual()">
+    </div>
+    <div id="manualResults"></div>
+  </div>
+
+  <div class="load-bar">
+    <div class="db-status" id="dbStatus">No worker database loaded</div>
+    <button class="btn btn-outline" onclick="loadDB()">⬆ Load workers.json</button>
+    <input type="file" id="dbFile" accept=".json" style="display:none" onchange="handleDBLoad(event)">
+  </div>
+</div>
+
+<!-- LOG VIEW -->
+<div class="view" id="logView">
+  <div class="stats-strip">
+    <div class="strip-stat">
+      <div class="strip-num" id="logTotal">0</div>
+      <div class="strip-lbl">On Site</div>
+    </div>
+    <div class="strip-stat">
+      <div class="strip-num" id="logTrades" style="color:var(--orange)">0</div>
+      <div class="strip-lbl">Trades</div>
+    </div>
+    <div class="strip-stat">
+      <div class="strip-num" id="logCompanies" style="color:#7ab4ff">0</div>
+      <div class="strip-lbl">Companies</div>
+    </div>
+  </div>
+
+  <div class="log-topbar">
+    <input type="text" id="logSearch" placeholder="🔍 Filter log…" oninput="renderLog()">
+  </div>
+
+  <div class="log-list" id="logList">
+    <div class="empty-log">No check-ins yet.<br>Scan worker badges on the Scan tab.</div>
+  </div>
+
+  <div class="export-bar">
+    <button class="btn btn-orange" onclick="exportCSV()" style="flex:1">⬇ Export CSV</button>
+    <button class="btn btn-red btn-outline" onclick="clearLog()">✕ Clear Log</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ---- State ----
+  let workerDB = [];      // loaded from workers.json
+  let todayLog = JSON.parse(localStorage.getItem('sitelog_today') || '[]');
+  let scanning = false;
+  let lastScan = '';
+  let lastScanTime = 0;
+  let animFrame;
+  let stream = null;
+
+  // ---- Init ----
+  const today = new Date();
+  document.getElementById('datePill').textContent =
+    today.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+
+  // Try restore DB
+  const savedDB = localStorage.getItem('sitelog_workers_db');
+  if (savedDB) {
+    try {
+      workerDB = JSON.parse(savedDB);
+      updateDBStatus();
+    } catch {}
+  }
+
+  // ---- Tabs ----
+  function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    const idx = tab === 'scan' ? 0 : 1;
+    document.querySelectorAll('.tab')[idx].classList.add('active');
+    document.getElementById(tab + 'View').classList.add('active');
+    if (tab === 'log') renderLog();
+  }
+
+  // ---- Toast ----
+  function showToast(msg, color) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.style.background = color || '#23a045';
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // ---- Camera ----
+  async function toggleCamera() {
+    if (scanning) {
+      stopCamera();
+    } else {
+      await startCamera();
+    }
+  }
+
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      const video = document.getElementById('camVideo');
+      video.srcObject = stream;
+      await video.play();
+      scanning = true;
+      document.getElementById('camBtn').textContent = '⏹ Stop Camera';
+      document.getElementById('scanHint').textContent = 'Point camera at worker\'s QR badge';
+      tick();
+    } catch (e) {
+      showToast('⚠ Camera not available. Use Manual Entry.', '#e8600a');
+      document.getElementById('scanHint').textContent = 'Camera unavailable — use Manual Entry below';
+    }
+  }
+
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    cancelAnimationFrame(animFrame);
+    scanning = false;
+    document.getElementById('camBtn').textContent = '▶ Start Camera';
+  }
+
+  function tick() {
+    if (!scanning) return;
+    const video = document.getElementById('camVideo');
+    const canvas = document.getElementById('camCanvas');
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+      if (code) {
+        const now = Date.now();
+        if (code.data !== lastScan || now - lastScanTime > 3000) {
+          lastScan = code.data;
+          lastScanTime = now;
+          handleQRCode(code.data);
+        }
+      }
+    }
+    animFrame = requestAnimationFrame(tick);
+  }
+
+  // ---- QR Processing ----
+  function handleQRCode(raw) {
+    let data;
+    try { data = JSON.parse(raw); } catch {
+      showFlash('error', '❌', 'Invalid QR Code', 'Not a SiteLog badge', '');
+      return;
+    }
+    if (!data.id) {
+      showFlash('error', '❌', 'Unknown QR Code', 'No worker ID found', '');
+      return;
+    }
+
+    // Check if already logged today
+    const existing = todayLog.find(e => e.id === data.id);
+    if (existing) {
+      showFlash('dupe', '⚠️',
+        data.fn + ' ' + data.ln,
+        (data.trade || '') + (data.company ? ' · ' + data.company : ''),
+        'Already checked in at ' + existing.timeIn
+      );
+      return;
+    }
+
+    // Find full record in DB
+    const dbRecord = workerDB.find(w => w.id === data.id);
+    const worker = dbRecord || {
+      id: data.id,
+      firstName: data.fn || '?',
+      lastName: data.ln || '?',
+      trade: data.trade || '?',
+      company: data.company || ''
+    };
+
+    const now = new Date();
+    const timeIn = now.toTimeString().slice(0,5);
+
+    const entry = {
+      id: worker.id,
+      firstName: worker.firstName,
+      lastName: worker.lastName,
+      trade: worker.trade,
+      company: worker.company || '',
+      phone: worker.phone || '',
+      timeIn,
+      date: now.toISOString().slice(0,10)
+    };
+
+    todayLog.push(entry);
+    saveTodayLog();
+
+    showFlash('success', '✅',
+      worker.firstName + ' ' + worker.lastName,
+      (worker.trade || '') + (worker.company ? ' · ' + worker.company : ''),
+      'Checked in at ' + timeIn
+    );
+
+    // Vibrate on success
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+
+  function showFlash(type, icon, name, meta, time) {
+    const el = document.getElementById('resultFlash');
+    el.className = 'result-flash ' + type;
+    document.getElementById('flashIcon').textContent = icon;
+    document.getElementById('flashName').textContent = name;
+    document.getElementById('flashMeta').textContent = meta;
+    document.getElementById('flashTime').textContent = time;
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.className = 'result-flash'; }, 4000);
+  }
+
+  // ---- DB Loading ----
+  function loadDB() { document.getElementById('dbFile').click(); }
+
+  function handleDBLoad(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!Array.isArray(data)) throw new Error();
+        workerDB = data;
+        localStorage.setItem('sitelog_workers_db', JSON.stringify(workerDB));
+        updateDBStatus();
+        showToast(`✓ Loaded ${workerDB.length} workers`);
+      } catch { showToast('⚠ Invalid workers.json', '#e8600a'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  }
+
+  function updateDBStatus() {
+    const el = document.getElementById('dbStatus');
+    if (workerDB.length > 0) {
+      el.textContent = `✓ ${workerDB.length} workers loaded`;
+      el.className = 'db-status loaded';
+    } else {
+      el.textContent = 'No worker database loaded';
+      el.className = 'db-status';
+    }
+  }
+
+  // ---- Manual Entry ----
+  function toggleManual() {
+    const panel = document.getElementById('manualPanel');
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')) {
+      document.getElementById('manualSearch').focus();
+    }
+  }
+
+  function searchManual() {
+    const q = document.getElementById('manualSearch').value.toLowerCase().trim();
+    const results = document.getElementById('manualResults');
+    if (!q || workerDB.length === 0) { results.innerHTML = ''; return; }
+
+    const matches = workerDB.filter(w =>
+      (w.firstName+' '+w.lastName+w.id).toLowerCase().includes(q)
+    ).slice(0, 5);
+
+    if (matches.length === 0) {
+      results.innerHTML = '<div style="font-size:0.75rem;color:#555;padding:4px 0">No matches found</div>';
+      return;
+    }
+
+    results.innerHTML = matches.map(w => `
+      <div onclick="manualCheckin('${w.id}')" style="
+        padding:8px 10px; margin-bottom:4px; background:var(--gray3);
+        border-radius:2px; cursor:pointer; display:flex; align-items:center; gap:10px;
+        font-size:0.85rem; border:1px solid transparent; transition:border-color 0.1s;
+      " onmouseover="this.style.borderColor='var(--yellow)'" onmouseout="this.style.borderColor='transparent'">
+        <span style="font-weight:600">${w.firstName} ${w.lastName}</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:#888">${w.id} · ${w.trade}</span>
+      </div>
+    `).join('');
+  }
+
+  function manualCheckin(id) {
+    const w = workerDB.find(x => x.id === id);
+    if (!w) return;
+
+    const existing = todayLog.find(e => e.id === id);
+    if (existing) {
+      showToast(`⚠ ${w.firstName} already checked in at ${existing.timeIn}`, '#e8600a');
+      return;
+    }
+
+    const now = new Date();
+    const timeIn = now.toTimeString().slice(0,5);
+    todayLog.push({ id: w.id, firstName: w.firstName, lastName: w.lastName, trade: w.trade, company: w.company || '', phone: w.phone || '', timeIn, date: now.toISOString().slice(0,10) });
+    saveTodayLog();
+
+    document.getElementById('manualSearch').value = '';
+    document.getElementById('manualResults').innerHTML = '';
+    document.getElementById('manualPanel').classList.remove('open');
+    showToast(`✓ ${w.firstName} ${w.lastName} checked in at ${timeIn}`);
+    showFlash('success', '✅', w.firstName + ' ' + w.lastName, w.trade + (w.company ? ' · ' + w.company : ''), 'Checked in at ' + timeIn);
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+
+  // ---- Log ----
+  function saveTodayLog() {
+    localStorage.setItem('sitelog_today', JSON.stringify(todayLog));
+  }
+
+  function tradeBadge(t) {
+    const m = { Foreman:'badge-orange', Electrician:'badge-blue', Plumber:'badge-blue', 'Safety Officer':'badge-green', 'Site Engineer':'badge-green', Surveyor:'badge-green', 'Crane Operator':'badge-orange' };
+    return m[t] || 'badge-gray';
+  }
+
+  function renderLog() {
+    const q = (document.getElementById('logSearch')?.value || '').toLowerCase();
+    const list = document.getElementById('logList');
+
+    const filtered = todayLog.filter(e =>
+      (e.firstName+' '+e.lastName+e.trade+e.company).toLowerCase().includes(q)
+    );
+
+    document.getElementById('logTotal').textContent = todayLog.length;
+    document.getElementById('logTrades').textContent = new Set(todayLog.map(e => e.trade)).size;
+    document.getElementById('logCompanies').textContent = new Set(todayLog.map(e => e.company).filter(Boolean)).size;
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty-log">No check-ins yet.<br>Scan worker badges on the Scan tab.</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map((e, i) => `
+      <div class="log-item">
+        <div class="log-num">${todayLog.indexOf(e)+1}</div>
+        <div class="log-info">
+          <div class="log-name">${e.firstName} ${e.lastName}</div>
+          <div class="log-sub"><span class="badge ${tradeBadge(e.trade)}">${e.trade}</span> ${e.company ? '· ' + e.company : ''}</div>
+        </div>
+        <div class="log-time">${e.timeIn}</div>
+      </div>
+    `).join('');
+  }
+
+  function exportCSV() {
+    if (todayLog.length === 0) { showToast('No entries to export', '#e8600a'); return; }
+    const headers = ['#','Date','Time In','First Name','Last Name','Worker ID','Trade','Company','Phone'];
+    const rows = todayLog.map((e,i) => [
+      i+1, e.date, e.timeIn, e.firstName, e.lastName, e.id, e.trade, e.company, e.phone
+    ].map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(','));
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `site-log-${todayLog[0]?.date || 'today'}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast(`✓ Exported ${todayLog.length} workers`);
+  }
+
+  function clearLog() {
+    if (todayLog.length === 0) return;
+    if (!confirm(`Clear all ${todayLog.length} check-ins from today's log?`)) return;
+    todayLog = [];
+    saveTodayLog();
+    renderLog();
+    showToast('Log cleared', '#888');
+  }
+
+  renderLog();
+</script>
+</body>
+</html>
