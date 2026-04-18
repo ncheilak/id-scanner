@@ -468,21 +468,53 @@
   }
 
   async function startCamera() {
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
-      const video = document.getElementById('camVideo');
-      video.srcObject = stream;
-      await video.play();
-      scanning = true;
-      document.getElementById('camBtn').textContent = '⏹ Stop Camera';
-      document.getElementById('scanHint').textContent = 'Point camera at worker\'s QR badge';
-      tick();
-    } catch (e) {
-      showToast('⚠ Camera not available. Use Manual Entry.', '#e8600a');
-      document.getElementById('scanHint').textContent = 'Camera unavailable — use Manual Entry below';
+    const video = document.getElementById('camVideo');
+    const hint  = document.getElementById('scanHint');
+    const btn   = document.getElementById('camBtn');
+
+    // Try rear camera first, fall back to any camera
+    const constraints = [
+      { video: { facingMode: { exact: 'environment' } } },
+      { video: { facingMode: 'environment' } },
+      { video: true }
+    ];
+
+    let gotStream = false;
+    for (const c of constraints) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(c);
+        gotStream = true;
+        break;
+      } catch (e) {
+        // try next constraint
+      }
     }
+
+    if (!gotStream) {
+      showToast('⚠ Camera permission denied. Use Manual Entry.', '#e8600a');
+      hint.textContent = 'Camera unavailable — use Manual Entry below';
+      return;
+    }
+
+    video.srcObject = stream;
+
+    // play() can throw on some mobile browsers even when the stream is fine —
+    // so we catch it silently and rely on the video 'playing' / 'canplay' event instead
+    try { await video.play(); } catch (_) { /* non-fatal on mobile */ }
+
+    // Wait until video is actually producing frames before starting tick
+    await new Promise(resolve => {
+      if (video.readyState >= 3) { resolve(); return; }
+      const onReady = () => { video.removeEventListener('canplay', onReady); resolve(); };
+      video.addEventListener('canplay', onReady);
+      // Fallback timeout in case event never fires
+      setTimeout(resolve, 2000);
+    });
+
+    scanning = true;
+    btn.textContent = '⏹ Stop Camera';
+    hint.textContent = 'Point camera at worker\'s QR badge ↑';
+    tick();
   }
 
   function stopCamera() {
@@ -494,24 +526,36 @@
 
   function tick() {
     if (!scanning) return;
-    const video = document.getElementById('camVideo');
+    const video  = document.getElementById('camVideo');
     const canvas = document.getElementById('camCanvas');
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
-      if (code) {
-        const now = Date.now();
-        if (code.data !== lastScan || now - lastScanTime > 3000) {
-          lastScan = code.data;
-          lastScanTime = now;
-          handleQRCode(code.data);
-        }
+
+    // readyState >= 2 (HAVE_CURRENT_DATA) is enough to draw a frame
+    if (video.readyState >= 2 && video.videoWidth > 0) {
+      // Resize canvas to match video only when dimensions change
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
       }
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      try {
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // attemptBoth handles light-on-dark and dark-on-light QR codes
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'attemptBoth'
+        });
+        if (code) {
+          const now = Date.now();
+          if (code.data !== lastScan || now - lastScanTime > 3000) {
+            lastScan     = code.data;
+            lastScanTime = now;
+            handleQRCode(code.data);
+          }
+        }
+      } catch (_) { /* getImageData can fail on some frames — skip silently */ }
     }
+
     animFrame = requestAnimationFrame(tick);
   }
 
